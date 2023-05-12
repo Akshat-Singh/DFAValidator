@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div class="titleText">NFA to Turing Machine Converter</div>
+
+<div class="container">
+    <div class="canvasContainer">
+        Canvas
+        <canvas id="myCanvas" width="800" height="600" style="border:2px solid orange; overflow: auto; text-align: center; font-family: 'consolas'"></canvas>
+    </div>
+    <div class="outputContainer">
+        Turing Machine Equivalent
+        <div id="output" style="width: 250px; height: 600px; border:2px solid orange; overflow: auto; text-align: center; font-family: 'consolas'"></div>
+    </div>
+</div>
+
+    
+
+<div class="button-container">
+    <button onclick="changeAction('state')">Add State</button>
+    <button onclick="changeAction('terminal')">Add Terminal State</button>
+    <button onclick="changeAction('0-transition')">Add 0-Transition</button>
+    <button onclick="changeAction('1-transition')">Add 1-Transition</button>
+    <button onclick="changeAction('ε-transition')">Add ε-Transition</button>
+    <button onclick="confirm()">Confirm</button>
+    <button onclick="changeAction('delete')">Delete</button>
+</div>
+
+
+<script>
+let canvas = document.getElementById('myCanvas');
+let ctx = canvas.getContext('2d');
+let outputDiv = document.getElementById('output');
+
+
+let states = [];
+let transitions = [];
+let action = null;
+let selectedState = null;
+let stateRadius = 30;
+let stateCount = 0;
+let offset = 20;
+
+
+canvas.addEventListener('click', function(event) {
+    let rect = canvas.getBoundingClientRect();
+    let x = event.clientX - rect.left;
+    let y = event.clientY - rect.top;
+
+    if (action === 'state' || action === 'terminal') {
+        for(let state of states) {
+            if(Math.sqrt(Math.pow(state.x - x, 2) + Math.pow(state.y - y, 2)) < 2 * stateRadius) {
+                return; // Do not allow states to overlap
+            }
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, stateRadius, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        if (action === 'terminal') {
+            ctx.beginPath();
+            ctx.arc(x, y, stateRadius - 5, 0, 2 * Math.PI);
+            ctx.stroke();
+        }0
+
+        let stateName = 'q' + stateCount;
+        ctx.fillText(stateName, x - ctx.measureText(stateName).width / 2, y + stateRadius + 15); // adjust the offset as needed
+
+        states.push({x, y, isTerminal: action === 'terminal', name: stateName});
+        stateCount++;
+    } else if (action === '0-transition' || action === '1-transition' || action === 'ε-transition') {
+        for(let state of states) {
+            if(Math.sqrt(Math.pow(state.x - x, 2) + Math.pow(state.y - y, 2)) < stateRadius) {
+                if(selectedState) {
+                    let dx = state.x - selectedState.x;
+                    let dy = state.y - selectedState.y;
+                    let angle = Math.atan2(dy, dx);
+                    let midX = (selectedState.x + state.x) / 2;
+                    let midY = (selectedState.y + state.y) / 2;
+                    let cpX = midX + 0.8 * 60 * Math.cos(angle + Math.PI / 2);
+                    let cpY = midY + 0.8 * 60 * Math.sin(angle + Math.PI / 2);
+
+                    // Check if a transition already exists between the two states
+                    let existingTransition = transitions.find(t => (t.state1 === selectedState && t.state2 === state) || (t.state1 === state && t.state2 === selectedState));
+                    if(existingTransition) {
+                        // If a transition already exists, adjust the control point of the curve to prevent overlap
+                        cpX += offset * Math.cos(angle + Math.PI / 2);
+                        cpY += offset * Math.sin(angle + Math.PI / 2);
+                        offset *= -1; // Alternate the direction of the offset for each overlapping transition
+                    }
+
+                    ctx.beginPath();
+                    ctx.moveTo(selectedState.x, selectedState.y);
+                    ctx.bezierCurveTo(cpX, cpY, cpX, cpY, state.x, state.y);
+
+                    if (action === 'ε-transition') 
+                        ctx.strokeStyle = 'black'
+                    else if (action === '1-transition') 
+                        ctx.strokeStyle = 'blue'
+                    else
+                        ctx.strokeStyle = 'red'
+
+                    ctx.stroke();
+                    drawArrowhead(ctx, cpX, cpY, state.x, state.y, 10);
+                    ctx.strokeStyle = 'black';
+
+                    transitions.push({state1: selectedState, state2: state, symbol: action.charAt(0)});
+                    selectedState = null;
+                } else {
+                    selectedState = state;
+                }
+                break;
+            }
+        }
+    } else if (action === 'delete') {
+        for(let i = states.length - 1; i >= 0; i--) {
+            let state = states[i];
+            if(Math.sqrt(Math.pow(state.x - x, 2) + Math.pow(state.y - y, 2)) < stateRadius) {
+                // Delete the state
+                states.splice(i, 1);
+
+                // Delete any transitions connected to the state
+                for(let j = transitions.length - 1; j >= 0; j--) {
+                    if(transitions[j].state1 === state || transitions[j].state2 === state) {
+                        transitions.splice(j, 1);
+                    }
+                }
+                
+                // Redraw the canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawStates();
+                drawTransitions();
+
+                break;
+            }
+        }
+
+        // If no state was clicked, check if a transition was clicked
+        for(let i = transitions.length - 1; i >= 0; i--) {
+            let transition = transitions[i];
+            let dx = transition.state2.x - transition.state1.x;
+            let dy = transition.state2.y - transition.state1.y;
+            let angle = Math.atan2(dy, dx);
+            let midX = (transition.state1.x + transition.state2.x) / 2;
+            let midY = (transition.state1.y + transition.state2.y) / 2;
+            let cpX = midX + 0.8 * 60 * Math.cos(angle + Math.PI / 2);
+            let cpY = midY + 0.8 * 60 * Math.sin(angle + Math.PI / 2);
+
+            // Check if the click was close to the transition curve
+            let t = closestPointOnBezier(x, y, transition.state1.x, transition.state1.y, cpX, cpY, transition.state2.x, transition.state2.y);
+            if (t !== null && Math.sqrt(Math.pow(t.x - x, 2) + Math.pow(t.y - y, 2)) < 10) {
+                // Delete the transition
+                transitions.splice(i, 1);
+                
+                // Redraw the canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawStates();
+                drawTransitions();
+
+                break;
+            }
+        }
+    }
+});
+
+function closestPointOnBezier(px, py, x1, y1, cpX, cpY, x2, y2) {
+    let t = 0;
+    let minDistance = Infinity;
+    let closestPoint = null;
+
+    for(let i = 0; i <= 5000; i++) {
+        let t = i / 5000;
+        let x = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cpX + t * t * x2;
+        let y = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cpY + t * t * y2;
+        let dx = x - px;
+        let dy = y - py;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+
+        if(distance < minDistance) {
+            minDistance = distance;
+            closestPoint = {x, y};
+        }
+    }
+
+    if(minDistance < 20) {
+        return closestPoint;
+    } else {
+        return null;
+    }
+}
+
+function changeAction(newAction) {
+    action = newAction;
+}
+
+function undo() {
+    // Not implemented
+}
+
+function drawStates() {
+    for(let state of states) {
+        ctx.beginPath();
+        ctx.arc(state.x, state.y, stateRadius, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        if (state.isTerminal) {
+            ctx.beginPath();
+            ctx.arc(state.x, state.y, stateRadius - 5, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
+
+        ctx.fillText(state.name, state.x - ctx.measureText(state.name).width / 2, state.y + stateRadius + 15);
+    }
+}
+function drawTransitions() {
+    for(let transition of transitions) {
+        let dx = transition.state2.x - transition.state1.x;
+        let dy = transition.state2.y - transition.state1.y;
+        let angle = Math.atan2(dy, dx);
+        let midX = (transition.state1.x + transition.state2.x) / 2;
+        let midY = (transition.state1.y + transition.state2.y) / 2;
+        let cpX = midX + 0.8 * 60 * Math.cos(angle + Math.PI / 2);
+        let cpY = midY + 0.8 * 60 * Math.sin(angle + Math.PI / 2);
+
+        // Check if a transition already exists between the two states
+        let existingTransition = transitions.find(t => (t.state1 === transition.state1 && t.state2 === transition.state2) || (t.state1 === transition.state2 && t.state2 === transition.state1));
+        if(existingTransition && existingTransition !== transition) {
+            // If a transition already exists, adjust the control point of the curve to prevent overlap
+            cpX += offset * Math.cos(angle + Math.PI / 2);
+            cpY += offset * Math.sin(angle + Math.PI / 2);
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(transition.state1.x, transition.state1.y);
+        ctx.bezierCurveTo(cpX, cpY, cpX, cpY, transition.state2.x, transition.state2.y);
+        if (action === 'ε-transition') 
+            ctx.strokeStyle = 'black'
+        else if (action === '1-transition') 
+            ctx.strokeStyle = 'blue'
+        else
+            ctx.strokeStyle = 'red'
+        ctx.stroke();
+
+        drawArrowhead(ctx, cpX, cpY, transition.state2.x, transition.state2.y, 10);
+
+        ctx.strokeStyle = 'black';
+    }
+}
+
+function drawArrow(fromx, fromy, tox, toy) {
+    alert("in here"); 
+    var headlen = 400;   // length of head in pixels
+    var dx = tox - fromx;
+    var dy = toy - fromy;
+    var angle = Math.atan2(dy, dx);
+
+    // Draw the arrow head
+    ctx.beginPath();
+    ctx.moveTo(tox, toy);
+    ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(tox, toy);
+    ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+    ctx.strokeStyle = 'black';
+    ctx.stroke();  // Draw it
+}
+
+function drawArrowhead(ctx, x1, y1, x2, y2, size) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let angle = Math.atan2(dy, dx);
+    
+    // Calculate the x,y for an end point if we were to travel in a straight
+    // line from the control point towards the start point some distance
+    let endX = x2 - size * Math.cos(angle);
+    let endY = y2 - size * Math.sin(angle);
+
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(endX - size * Math.cos(angle - Math.PI / 6), endY - size * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(endX - size * Math.cos(angle + Math.PI / 6), endY - size * Math.sin(angle + Math.PI / 6));
+    ctx.stroke();
+}
+
+
+function confirm() {
+    outputDiv.innerHTML = ''; // clear the previous output
+    console.log(transitions);
+    for(let transition of transitions) {
+        let line = `<p>${transition.state1.name} ${transition.symbol} ${transition.symbol} ${transition.state2.name}</p>`;
+        outputDiv.innerHTML += line;
+        console.log(line)
+    }
+    dfa = convertNFAToDFA(transitions);
+    console.log(dfa);
+}
+
+function convertNFAToDFA(nfa) {
+    let dfa = [];
+    let unmarkedStates = {};
+    let stateCounter = 0;
+
+    let startState = epsilonClosure([nfa[0].state1.name], nfa);
+    let startStateName = "q" + stateCounter++;
+    unmarkedStates[stateSetToString(startState)] = startStateName;
+
+    while (Object.keys(unmarkedStates).length > 0) {
+        let TSetString = Object.keys(unmarkedStates)[0];
+        let TSet = stringToStateSet(TSetString);
+        let TName = unmarkedStates[TSetString];
+        delete unmarkedStates[TSetString];
+
+        ['0', '1'].forEach(symbol => {
+            let U = epsilonClosure(move(TSet, symbol, nfa), nfa);
+            if (U.length === 0) {
+                return;
+            }
+
+            let UName = unmarkedStates[stateSetToString(U)];
+            let isTerminal = U.some(stateName => nfa.some(trans => trans.state2.name === stateName && trans.state2.isTerminal));
+            if (UName === undefined) {
+                UName = "q" + stateCounter++;
+                unmarkedStates[stateSetToString(U)] = UName;
+            }
+
+            dfa.push({
+                state1: {name: TName, isTerminal: TSet.some(stateName => nfa.some(trans => trans.state2.name === stateName && trans.state2.isTerminal))},
+                state2: {name: UName, isTerminal: isTerminal},
+                symbol: symbol
+            });
+        });
+        console.log(dfa);
+    }
+
+    return dfa;
+}
+
+function move(T, symbol, transitions) {
+    let result = [];
+    for (let stateName of T) {
+        for (let trans of transitions) {
+            if (trans.symbol === symbol && trans.state1.name === stateName) {
+                result = addStateToSet(trans.state2.name, result);
+            }
+        }
+    }
+    return result;
+}
+
+function epsilonClosure(T, transitions) {
+    let stack = [...T];
+    let result = [...T];
+
+    while (stack.length > 0) {
+        let stateName = stack.pop();
+        for (let trans of transitions) {
+            if (trans.symbol === 'ε' && trans.state1.name === stateName) {
+                if (!stateIsInSet(trans.state2.name, result)) {
+                    result = addStateToSet(trans.state2.name, result);
+                    stack.push(trans.state2.name);
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+function stateSetToString(set) {
+    return JSON.stringify(set.sort());
+}
+
+function stringToStateSet(str) {
+    return JSON.parse(str);
+}
+
+function stateIsInSet(state, set) {
+    return set.includes(state);
+}
+
+function addStateToSet(state, set) {
+    if (!stateIsInSet(state, set)) {
+        set.push(state);
+    }
+    return set;
+}
+
+
+
+</script>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #ffffff;
+        color: #333;
+    }
+    
+    h1 {
+        text-align: center;
+        color: #333;
+    }
+    
+    #myCanvas {
+        border: 1px solid #ffffff;
+        display: block;
+        margin: 0 auto;
+    }
+    
+    .buttons {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    button {
+        padding: 5px 10px;
+        font-size: 16px;
+        border: 1px solid #aaa;
+        border-radius: 5px;
+        background-color: #eee;
+        cursor: pointer;
+        font-family: 'consolas';
+    }
+    
+    button:active {
+        background-color: #ddd;
+    }
+    
+    #transitions {
+        width: 80%;
+        height: 200px;
+        margin: 20px auto;
+        border: 1px solid #999;
+        padding: 10px;
+        overflow: auto;
+        font-family: monospace;
+        font-size: 14px;
+        white-space: pre;
+    }
+
+    .button-container {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .container {
+        margin: 10px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .canvasContainer {
+        font-family: 'consolas';
+        text-align: center;
+        margin-right: 10px;
+    }
+
+    .outputContainer {
+        font-family: 'consolas';
+        text-align: center;
+    }
+
+    .titleText {
+        font-family: 'consolas';
+        text-align: center;
+        font-size: 24px;
+    }
+</style>
+    
+
+</body>
+</html>
